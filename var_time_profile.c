@@ -18,6 +18,10 @@
 # include <math.h>
 # include <stdlib.h>
 # include <time.h>
+#include <omp.h>
+#include <iostream>
+
+using namespace std;
 
 #define C 2.9979e10
 #define MP 1.50e-3
@@ -153,11 +157,14 @@ double lum_dist(double z)
         return(dlum);
     }
 
+  double clk[100]={0}; /* Added */
 
 /************************************************************************/
 /************************************************************************/
 int main()
 {
+      clk[0] = 1000*omp_get_wtime();
+
     clock_t begin = clock();    // This function is used to calculate the total CPU time of the simulation
     
     FILE *time_res_spectra, *flux_epk_time, *f_eps_t, *theta_pars, *shell_pars;
@@ -176,16 +183,16 @@ int main()
 
     /*Define eSe[N_eps][N_shell][N_seg]: A 3-D flux array that stores the values of vFv flux for each energy, shell position and time-segment respectively */
     double ***eSe;
-	eSe = malloc(N_eps*sizeof(double**));
+	eSe = (double ***)malloc(N_eps*sizeof(double**));
 	for (i_eps = 0; i_eps < N_eps; i_eps ++){
-		eSe[i_eps] = malloc(N_shell*sizeof(double*));
-		for(i_shell = 0; i_shell < N_shell; i_shell ++)eSe[i_eps][i_shell] =  malloc(N_seg*sizeof(double));
+		eSe[i_eps] = (double **) malloc(N_shell*sizeof(double*));
+		for(i_shell = 0; i_shell < N_shell; i_shell ++)eSe[i_eps][i_shell] = (double*)  malloc(N_seg*sizeof(double));
 	}
     
     /*Define eSe_total[N_eps][N_seg]: A 2-D flux array that stores the values of vFv flux for each energy and time-segment respectively after integrating over all shell positions*/
     double **eSe_total;
-    eSe_total = malloc(N_eps*sizeof(double*));
-    for(i_eps = 0; i_eps < N_eps; i_eps ++) eSe_total[i_eps] = malloc(N_seg*sizeof(double));
+    eSe_total = (double **)malloc(N_eps*sizeof(double*));
+    for(i_eps = 0; i_eps < N_eps; i_eps ++) eSe_total[i_eps] =(double *) malloc(N_seg*sizeof(double));
     
    double G0 = 0., bG = 0., z = 0., etat = 0., etadelta = 0., etar = 0.;
    double theta = 0., mu = 0., dmu = 0., factor_theta = 0., d_theta = 0., theta_prev = 0.;
@@ -228,14 +235,21 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
     //delta_eps = eps - eps_prev;
 	en[i_eps] = epsmin*pow(10.0,epsfactor*i_eps);
     t0 = t1;  //The initial value of the variability time t0
+
+      clk[1] = 1000*omp_get_wtime();
+
+
+
     for(i_shell = 0; i_shell < N_shell; i_shell ++)
     {
-         if(i_eps == 100)fprintf(shell_pars,"%d %e %e %e",i_shell, t0, r0, time_profile(time_profile_flag,t0,t1));
+         //if(i_eps == 100)fprintf(shell_pars,"%d %e %e %e",i_shell, t0, r0, time_profile(time_profile_flag,t0,t1));
         coef = (C*uprime/(6.*SQ(dlum)*deltarpm)) * time_profile(time_profile_flag,t0,t1);
         r0=etar*2.*SQ(G0)*C*t0/(1.+z); // calculate r0 = r0(t0)
         tinitial=(1.+z)*((r0*(1.-bG)/(bG*C))-(deltar/(bG*C))); // calculate tinitial = tinitial(t0)
         n_shift = (int)(del_t0/step_seg);  //shift the light curve by a time corresponding to the new tinitial
+
         for(i_time = 0; i_time < i_shell*n_shift; i_time ++)eSe[i_eps][i_shell][i_time] = 0.;
+#pragma omp parallel for
         for(i_time = i_shell*n_shift; i_time < N_seg; i_time ++)
         {
             time = tinitial+step_seg * (i_time-i_shell*n_shift);
@@ -261,12 +275,12 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
                   if(ru <= rl) term=0.0;
                   else term=pow(delta,3.)*(pow(ru,3.)-pow(rl,3.))*sed_function(spec_flag, delta, eps, epk0pm, z);
 				factor += dmu*term/SQ(1.e28);
-                if(i_eps == 100 && i_shell == 0 && i_time == 50)fprintf(theta_pars,"%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n",i_theta, theta, d_theta, mu, dmu, delta, r0a, r1a, r0b, r1b, ru, rl, ru-rl, term, factor);
+                //if(i_eps == 100 && i_shell == 0 && i_time == 50)fprintf(theta_pars,"%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n",i_theta, theta, d_theta, mu, dmu, delta, r0a, r1a, r0b, r1b, ru, rl, ru-rl, term, factor);
                 theta_prev = theta;
 			} /*close mu integration loop */
             
 			eSe[i_eps][i_shell][i_time] += coef*factor;
-            if(i_eps == 100 && i_shell < 10)fprintf(f_eps_t,"%e %e\n",tinitial+i_time*step_seg,eSe[i_eps][i_shell][i_time]);
+            //if(i_eps == 100 && i_shell < 10)fprintf(f_eps_t,"%e %e\n",tinitial+i_time*step_seg,eSe[i_eps][i_shell][i_time]);
         } /* close time loop */
         
         t0 += del_t0; //Increment t0 for the next shell propagation delay
@@ -274,11 +288,13 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
     
     en[i_eps] = 511.0*en[i_eps];
 } /* close energy loop */
-
+      clk[2] = 1000*omp_get_wtime();
 for(i_eps = 0; i_eps < N_eps; i_eps ++)
 {
+//#pragma omp parallel for
   for(i_time = 0; i_time < N_seg; i_time ++)
   {
+//#pragma omp parallel for
      for(i_shell = 0; i_shell < N_shell; i_shell ++)
      {
          eSe_total[i_eps][i_time] += eSe[i_eps][i_shell][i_time];
@@ -291,7 +307,7 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
 {
   for(i_time = 0; i_time < N_seg; i_time ++)
   {
-	if(i_time % 50 == 0)fprintf(time_res_spectra,"%e %e\n", log10(en[i_eps]), log10(eSe_total[i_eps][i_time]));
+	//if(i_time % 50 == 0)fprintf(time_res_spectra,"%e %e\n", log10(en[i_eps]), log10(eSe_total[i_eps][i_time]));
   }
 }
 
@@ -299,6 +315,7 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
 for(i_time = 0; i_time < N_seg; i_time ++)
 {
   time = tinitial_0 + step_seg*i_time;
+#pragma omp parallel for
   for(i_eps = 0; i_eps < N_eps; i_eps ++)
   {
     if(eSe_total[i_eps][i_time] >= max[i_time])
@@ -307,7 +324,7 @@ for(i_time = 0; i_time < N_seg; i_time ++)
       max[i_time] = eSe_total[i_eps][i_time];
     }
   }
-fprintf(flux_epk_time,"%e %e %e\n", log10(time), log10(eps_max[i_time]), log10(max[i_time]));
+//fprintf(flux_epk_time,"%e %e %e\n", log10(time), log10(eps_max[i_time]), log10(max[i_time]));
 }
 
     
@@ -320,6 +337,7 @@ fprintf(flux_epk_time,"%e %e %e\n", log10(time), log10(eps_max[i_time]), log10(m
     double lc_counts[N_band][N_seg] = {{0.},{0.}};
     double lc_total[N_seg] = {0.};
     
+      clk[3] = 1000*omp_get_wtime();
 
 for(i_time = 0; i_time < N_seg; i_time ++)
 {
@@ -332,8 +350,9 @@ for(i_time = 0; i_time < N_seg; i_time ++)
             }
             lc_total[i_time] += det_area*eSe_total[i_eps][i_time];
         }
-       fprintf(lc,"%e %e %e %e %e %e\n", time, lc_counts[0][i_time], lc_counts[1][i_time], lc_counts[2][i_time], lc_counts[3][i_time], lc_total[i_time]);
+      // fprintf(lc,"%e %e %e %e %e %e\n", time, lc_counts[0][i_time], lc_counts[1][i_time], lc_counts[2][i_time], lc_counts[3][i_time], lc_total[i_time]);
    }
+      clk[4] = 1000*omp_get_wtime();
 
 
 free(**eSe);
@@ -349,6 +368,31 @@ fclose(theta_pars);
 fclose(shell_pars);
 clock_t end = clock();
 printf("Elapsed: %f seconds\n", (double)(end - begin)/CLOCKS_PER_SEC);
+
+      clk[99] = 1000*omp_get_wtime();
+        printf("\n Loop 2,1:\t%f [ms]\n Loop 4,3:\t%f [ms]"
+                      /*  "       \n Iter 6,5:\t%f [ms]"
+                        "       \n Visc 8,7:\t%f [ms]"
+                        "       \n Mnext 9,8:\t%f [ms]"
+                        "       \n Aval 10,9:\t%f [ms]"
+                        "       \n Mnext 12,11:\t%f [ms]"
+                        "       \n SDev 13,12:\t%f [ms]"
+                        "       \n Loop 10,9:\t%f [ms]" */
+                        "       \n TOTAL: \t%f [sec]\n",
+                        clk[2]-clk[1],
+                        clk[4]-clk[3],
+                /*        clk[6]-clk[5],
+                        clk[8]-clk[7],
+                        clk[9]-clk[8],
+                        clk[10]-clk[9],
+                        clk[12]-clk[11],
+                        clk[13]-clk[12],*/
+                   /*     clk8-clk7,
+                        clk9-clk8,
+                        clk10-clk9, */
+                        (clk[99]-clk[0])/1000.);
+
+
 return(0);
 }
 
