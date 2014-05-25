@@ -36,7 +36,7 @@ using namespace std;
 
 #define N_eps 200 // Number of energy points with logarithmic resolution
 #define N_band 4  //Number of energy bands in which light curves are extracted
-#define N_shell 10 //Number of shell propagation delays
+#define N_shell 20 //Number of shell propagation delays
 #define N_seg 100 // Number of time segments for each shell propagation delay
 #define N_theta 100   // Number of angular points over which the angular integration is performed. I have used logarithmic resolution to increase the speed of integration
 #define theta_min 1.e-3  // Minimum value of theta (on-axis)
@@ -147,8 +147,7 @@ double time_profile(int time_profile_flag, double t0, double t1)
 double lum_dist(double z)
     {
         double zp = 0., dzp = 0., dlum = 0.;
-        int i = 0;
-        for(i = 0; i < N_lum; i ++)
+        for(int i = 0; i < N_lum; i ++)
         {
             zp = i*z/N_lum;
             dzp = z/N_lum;
@@ -183,10 +182,10 @@ int main()
 
     /*Define eSe[N_eps][N_shell][N_seg]: A 3-D flux array that stores the values of vFv flux for each energy, shell position and time-segment respectively */
     double ***eSe;
-	eSe = (double ***)malloc(N_eps*sizeof(double**));
+	if (NULL == (eSe = (double ***)malloc(N_eps*sizeof(double**)))){ puts("eSe malloc failure: line 185");exit(1);}
 	for (i_eps = 0; i_eps < N_eps; i_eps ++){
-		eSe[i_eps] = (double **) malloc(N_shell*sizeof(double*));
-		for(i_shell = 0; i_shell < N_shell; i_shell ++)eSe[i_eps][i_shell] = (double*)  malloc(N_seg*sizeof(double));
+		if (NULL == (eSe[i_eps] = (double **) malloc(N_shell*sizeof(double*)))){puts("eSe malloc failure: line 187");exit(1);}
+		for(i_shell = 0; i_shell < N_shell; i_shell ++){	if (NULL == (eSe[i_eps][i_shell] = (double*)  malloc(N_seg*sizeof(double)))){puts("eSe malloc failure: line 188");exit(1);};/*cout << N_eps*sizeof(double**)*1+N_shell*sizeof(double*)*N_eps+N_seg*sizeof(double)*N_eps*N_shell <<endl;*/}
 	}
     
     /*Define eSe_total[N_eps][N_seg]: A 2-D flux array that stores the values of vFv flux for each energy and time-segment respectively after integrating over all shell positions*/
@@ -248,8 +247,14 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
         tinitial=(1.+z)*((r0*(1.-bG)/(bG*C))-(deltar/(bG*C))); // calculate tinitial = tinitial(t0)
         n_shift = (int)(del_t0/step_seg);  //shift the light curve by a time corresponding to the new tinitial
 
-        for(i_time = 0; i_time < i_shell*n_shift; i_time ++)eSe[i_eps][i_shell][i_time] = 0.;
-#pragma omp parallel for
+        for(i_time = 0; i_time < i_shell*n_shift; i_time ++) {
+		if (  (i_eps+1)*(i_shell+1)*(i_time+1)  > N_eps*N_shell*N_seg) {
+			cout <<i_time << " " << (i_eps+1)*(i_shell+1)*(i_time+1) << "||"<<N_eps*N_shell*N_seg<<endl;
+		}	
+	}
+
+//        for(i_time = 0; i_time < i_shell*n_shift; i_time ++)eSe[i_eps][i_shell][i_time] = 0.;
+//#pragma omp parallel for
         for(i_time = i_shell*n_shift; i_time < N_seg; i_time ++)
         {
             time = tinitial+step_seg * (i_time-i_shell*n_shift);
@@ -294,7 +299,7 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
 //#pragma omp parallel for
   for(i_time = 0; i_time < N_seg; i_time ++)
   {
-//#pragma omp parallel for
+#pragma omp parallel for
      for(i_shell = 0; i_shell < N_shell; i_shell ++)
      {
          eSe_total[i_eps][i_time] += eSe[i_eps][i_shell][i_time];
@@ -315,7 +320,7 @@ for(i_eps = 0; i_eps < N_eps; i_eps ++)
 for(i_time = 0; i_time < N_seg; i_time ++)
 {
   time = tinitial_0 + step_seg*i_time;
-#pragma omp parallel for
+//#pragma omp parallel for
   for(i_eps = 0; i_eps < N_eps; i_eps ++)
   {
     if(eSe_total[i_eps][i_time] >= max[i_time])
